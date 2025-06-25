@@ -38,7 +38,7 @@ Resources:
             AllowedMethods: [GET]
             AllowedOrigins: ['*']
             MaxAge: 3000
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
 
   WebsiteBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -68,7 +68,7 @@ Resources:
             Transitions:
               - TransitionInDays: 180
                 StorageClass: GLACIER
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
 
   # ========== DynamoDB Table ==========
   EnergyDataTable:
@@ -102,7 +102,7 @@ Resources:
       FunctionName: !Sub "data-simulation-${Environment}"
       Runtime: nodejs18.x
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
         ZipFile: |
           // This is a placeholder. The actual code will be deployed separately.
@@ -127,7 +127,7 @@ Resources:
       FunctionName: !Sub "api-handler-${Environment}"
       Runtime: nodejs18.x
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
         ZipFile: |
           // This is a placeholder. The actual code will be deployed separately.
@@ -152,7 +152,7 @@ Resources:
       FunctionName: !Sub "archive-${Environment}"
       Runtime: nodejs18.x
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
         ZipFile: |
           // This is a placeholder. The actual code will be deployed separately.
@@ -177,7 +177,7 @@ Resources:
       FunctionName: !Sub "alert-checker-${Environment}"
       Runtime: nodejs18.x
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
         ZipFile: |
           // This is a placeholder. The actual code will be deployed separately.
@@ -195,46 +195,6 @@ Resources:
       Tags:
         - Key: Environment
           Value: !Ref Environment
-
-  # ========== IAM Role ==========
-  LambdaExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "SmartCampusEnergyLambdaRole-${Environment}"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
-      Policies:
-        - PolicyName: SmartCampusEnergyPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'dynamodb:*'
-                Resource: !GetAtt EnergyDataTable.Arn
-              - Effect: Allow
-                Action:
-                  - 's3:*'
-                Resource:
-                  - !GetAtt HistoricalDataBucket.Arn
-                  - !Sub "${HistoricalDataBucket.Arn}/*"
-                  - !GetAtt WebsiteBucket.Arn
-                  - !Sub "${WebsiteBucket.Arn}/*"
-              - Effect: Allow
-                Action:
-                  - 'sns:Publish'
-                Resource: !Ref AlertTopic
-              - Effect: Allow
-                Action:
-                  - 'cloudwatch:PutMetricData'
-                Resource: '*'
 
   # ========== EventBridge Rules ==========
   DataSimulationSchedule:
@@ -320,29 +280,6 @@ Resources:
       Principal: "apigateway.amazonaws.com"
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${EnergyApi}/${Environment}/GET/energy"
 
-  # ========== CloudFront Distribution ==========
-  CloudFrontDistribution:
-    Type: AWS::CloudFront::Distribution
-    Properties:
-      DistributionConfig:
-        Origins:
-          - DomainName: !GetAtt WebsiteBucket.DomainName
-            Id: S3Origin
-            S3OriginConfig:
-              OriginAccessIdentity: ''
-        Enabled: true
-        DefaultRootObject: index.html
-        DefaultCacheBehavior:
-          TargetOriginId: S3Origin
-          ForwardedValues:
-            QueryString: false
-            Cookies:
-              Forward: none
-          ViewerProtocolPolicy: redirect-to-https
-        PriceClass: PriceClass_100
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: true
-
   # ========== SNS Topic ==========
   AlertTopic:
     Type: AWS::SNS::Topic
@@ -371,9 +308,9 @@ Outputs:
     Description: "API Gateway endpoint URL"
     Value: !Sub "https://${EnergyApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/energy"
 
-  CloudFrontURL:
-    Description: "CloudFront Distribution URL"
-    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+  WebsiteURL:
+    Description: "S3 Website URL"
+    Value: !Sub "http://${WebsiteBucket}.s3-website-${AWS::Region}.amazonaws.com"
 
   DynamoDBTable:
     Description: "DynamoDB Table Name"

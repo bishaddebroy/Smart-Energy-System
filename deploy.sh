@@ -55,6 +55,18 @@ else
     echo -e "${GREEN}✓ Deployment bucket exists${NC}"
 fi
 
+# Clean up existing S3 buckets if needed
+echo "Checking for existing resources..."
+WEBSITE_BUCKET="smart-campus-energy-website-$(aws sts get-caller-identity --query Account --output text)-${ENVIRONMENT}"
+HISTORICAL_BUCKET="smart-campus-energy-data-$(aws sts get-caller-identity --query Account --output text)-${ENVIRONMENT}"
+
+# Try to delete existing buckets (ignore errors)
+echo "Attempting to clean up any existing S3 buckets..."
+aws s3 rm "s3://${WEBSITE_BUCKET}" --recursive 2>/dev/null || true
+aws s3 rb "s3://${WEBSITE_BUCKET}" 2>/dev/null || true
+aws s3 rm "s3://${HISTORICAL_BUCKET}" --recursive 2>/dev/null || true
+aws s3 rb "s3://${HISTORICAL_BUCKET}" 2>/dev/null || true
+
 # Build and package Lambda functions
 echo "Building and packaging Lambda functions..."
 
@@ -93,7 +105,7 @@ echo -e "${YELLOW}This may take several minutes...${NC}"
 aws cloudformation deploy \
     --template-file ${PACKAGED_TEMPLATE} \
     --stack-name ${STACK_NAME} \
-    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+    --capabilities CAPABILITY_NAMED_IAM \
     --parameter-overrides Environment=${ENVIRONMENT} RetentionDays=30 \
     --region ${REGION}
 
@@ -103,7 +115,7 @@ echo -e "${GREEN}✓ Stack deployed successfully${NC}"
 echo "Retrieving stack outputs..."
 WEBSITE_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='WebsiteBucketName'].OutputValue" --output text)
 API_ENDPOINT=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
-CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='CloudFrontURL'].OutputValue" --output text)
+WEBSITE_URL=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='WebsiteURL'].OutputValue" --output text)
 
 # Update API endpoint in web app configuration
 echo "Updating API endpoint in web application..."
@@ -112,26 +124,14 @@ rm src/web/js/app.js.bak
 
 # Upload website files to S3
 echo "Uploading website files to S3..."
-aws s3 sync src/web/ "s3://${WEBSITE_BUCKET}/" --acl public-read --region ${REGION}
+aws s3 sync src/web/ "s3://${WEBSITE_BUCKET}/" --region ${REGION}
 
 echo -e "${GREEN}✓ Website uploaded${NC}"
-
-# Create invalidation to refresh CloudFront cache
-echo "Creating CloudFront invalidation..."
-CLOUDFRONT_DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='${CLOUDFRONT_URL#https://}'].Id" --output text --region ${REGION})
-
-if [ ! -z "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
-    aws cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} --paths "/*" --region ${REGION}
-    echo -e "${GREEN}✓ CloudFront invalidation created${NC}"
-else
-    echo -e "${YELLOW}Warning: Could not find CloudFront distribution ID. Cache invalidation skipped.${NC}"
-fi
 
 # Print summary
 echo -e "\n${GREEN}======================================================${NC}"
 echo -e "${GREEN}Deployment Completed Successfully!${NC}"
 echo -e "${GREEN}======================================================${NC}"
-echo -e "Website URL: ${CLOUDFRONT_URL}"
+echo -e "Website URL: ${WEBSITE_URL}"
 echo -e "API Endpoint: ${API_ENDPOINT}"
-echo -e "\nNote: It may take a few minutes for the CloudFront distribution to fully deploy."
 echo -e "${GREEN}======================================================${NC}"
