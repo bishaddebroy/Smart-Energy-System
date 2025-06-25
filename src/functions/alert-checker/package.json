@@ -1,0 +1,9 @@
+{
+  "name": "smart-campus-energy-lambda",
+  "version": "1.0.0",
+  "description": "Smart Campus Energy Management System Lambda Functions",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1431.0"
+  }
+}
