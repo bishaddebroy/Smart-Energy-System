@@ -104,12 +104,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        ZipFile: |
-          // This is a placeholder. The actual code will be deployed separately.
-          exports.handler = async (event) => {
-            console.log('Data Simulation Lambda invoked');
-            return { statusCode: 200 };
-          };
+        S3Bucket: !Ref 'AWS::NoValue'
+        S3Key: !Ref 'AWS::NoValue'
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -129,12 +125,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        ZipFile: |
-          // This is a placeholder. The actual code will be deployed separately.
-          exports.handler = async (event) => {
-            console.log('API Handler Lambda invoked');
-            return { statusCode: 200 };
-          };
+        S3Bucket: !Ref 'AWS::NoValue'
+        S3Key: !Ref 'AWS::NoValue'
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -154,12 +146,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        ZipFile: |
-          // This is a placeholder. The actual code will be deployed separately.
-          exports.handler = async (event) => {
-            console.log('Archive Lambda invoked');
-            return { statusCode: 200 };
-          };
+        S3Bucket: !Ref 'AWS::NoValue'
+        S3Key: !Ref 'AWS::NoValue'
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -179,12 +167,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        ZipFile: |
-          // This is a placeholder. The actual code will be deployed separately.
-          exports.handler = async (event) => {
-            console.log('Alert Checker Lambda invoked');
-            return { statusCode: 200 };
-          };
+        S3Bucket: !Ref 'AWS::NoValue'
+        S3Key: !Ref 'AWS::NoValue'
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable

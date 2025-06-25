@@ -67,26 +67,39 @@ aws s3 rb "s3://${WEBSITE_BUCKET}" 2>/dev/null || true
 aws s3 rm "s3://${HISTORICAL_BUCKET}" --recursive 2>/dev/null || true
 aws s3 rb "s3://${HISTORICAL_BUCKET}" 2>/dev/null || true
 
-# Build and package Lambda functions
-echo "Building and packaging Lambda functions..."
-
+# Package Lambda functions
+echo "Packaging Lambda functions..."
 FUNCTIONS=("data-simulation" "api-handler" "archive" "alert-checker")
 
 for func in "${FUNCTIONS[@]}"; do
-    echo "Building function: ${func}"
-    cd "src/functions/${func}"
+    echo "Packaging function: ${func}"
     
-    # Install dependencies if package.json exists and node_modules doesn't
-    if [ -f package.json ] && [ ! -d node_modules ]; then
+    # Create a temporary directory for packaging
+    TEMP_DIR=$(mktemp -d)
+    
+    # Copy function code to temp directory
+    cp -r "src/functions/${func}/"* "${TEMP_DIR}/"
+    
+    # Install dependencies if package.json exists
+    if [ -f "${TEMP_DIR}/package.json" ]; then
         echo "Installing dependencies for ${func}..."
-        npm install --production
+        (cd "${TEMP_DIR}" && npm install --production)
     fi
     
-    # Go back to the project root
-    cd ../../..
+    # Create a zip file
+    ZIP_FILE="${func}.zip"
+    (cd "${TEMP_DIR}" && zip -r "${ZIP_FILE}" .)
+    mv "${TEMP_DIR}/${ZIP_FILE}" .
+    
+    # Upload to S3
+    aws s3 cp "${ZIP_FILE}" "s3://${DEPLOYMENT_BUCKET}/lambda/${ZIP_FILE}" --region ${REGION}
+    
+    # Clean up
+    rm "${ZIP_FILE}"
+    rm -rf "${TEMP_DIR}"
+    
+    echo -e "${GREEN}✓ Function ${func} packaged and uploaded${NC}"
 done
-
-echo -e "${GREEN}✓ Lambda functions packaged${NC}"
 
 # Package CloudFormation template
 echo "Packaging CloudFormation template..."
