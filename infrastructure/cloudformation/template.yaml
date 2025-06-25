@@ -104,8 +104,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        S3Bucket: !Ref 'AWS::NoValue'
-        S3Key: !Ref 'AWS::NoValue'
+        S3Bucket: !Sub "smart-campus-energy-deployment-${Environment}"
+        S3Key: "lambda/data-simulation.zip"
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -125,8 +125,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        S3Bucket: !Ref 'AWS::NoValue'
-        S3Key: !Ref 'AWS::NoValue'
+        S3Bucket: !Sub "smart-campus-energy-deployment-${Environment}"
+        S3Key: "lambda/api-handler.zip"
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -146,8 +146,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        S3Bucket: !Ref 'AWS::NoValue'
-        S3Key: !Ref 'AWS::NoValue'
+        S3Bucket: !Sub "smart-campus-energy-deployment-${Environment}"
+        S3Key: "lambda/archive.zip"
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -167,8 +167,8 @@ Resources:
       Handler: index.handler
       Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
       Code:
-        S3Bucket: !Ref 'AWS::NoValue'
-        S3Key: !Ref 'AWS::NoValue'
+        S3Bucket: !Sub "smart-campus-energy-deployment-${Environment}"
+        S3Key: "lambda/alert-checker.zip"
       Environment:
         Variables:
           TABLE_NAME: !Ref EnergyDataTable
@@ -248,14 +248,12 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiHandlerFunction.Arn}/invocations"
-        IntegrationResponses:
-          - StatusCode: 200
-            ResponseParameters:
-              method.response.header.Access-Control-Allow-Origin: "'*'"
       MethodResponses:
         - StatusCode: 200
           ResponseParameters:
             method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
 
   # OPTIONS Method for CORS preflight requests
   EnergyApiOptionsMethod:
