@@ -1,0 +1,381 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Smart Campus Energy Management System - CloudFormation Template'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment (dev or prod)
+  
+  RetentionDays:
+    Type: Number
+    Default: 30
+    Description: Number of days to retain data in DynamoDB before archiving
+
+Resources:
+  # ========== S3 Buckets ==========
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "smart-campus-energy-website-${AWS::AccountId}-${Environment}"
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+    DeletionPolicy: Retain
+
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub "${WebsiteBucket.Arn}/*"
+
+  HistoricalDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "smart-campus-energy-data-${AWS::AccountId}-${Environment}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToStandardIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 180
+                StorageClass: GLACIER
+    DeletionPolicy: Retain
+
+  # ========== DynamoDB Table ==========
+  EnergyDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "EnergyData-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: buildingId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: buildingId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========== Lambda Functions ==========
+  DataSimulationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "data-simulation-${Environment}"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          // This is a placeholder. The actual code will be deployed separately.
+          exports.handler = async (event) => {
+            console.log('Data Simulation Lambda invoked');
+            return { statusCode: 200 };
+          };
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EnergyDataTable
+          ENVIRONMENT: !Ref Environment
+          RETENTION_DAYS: !Ref RetentionDays
+      Timeout: 60
+      MemorySize: 256
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  ApiHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "api-handler-${Environment}"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          // This is a placeholder. The actual code will be deployed separately.
+          exports.handler = async (event) => {
+            console.log('API Handler Lambda invoked');
+            return { statusCode: 200 };
+          };
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EnergyDataTable
+          ENVIRONMENT: !Ref Environment
+          HISTORICAL_BUCKET: !Ref HistoricalDataBucket
+      Timeout: 30
+      MemorySize: 256
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  ArchiveFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "archive-${Environment}"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          // This is a placeholder. The actual code will be deployed separately.
+          exports.handler = async (event) => {
+            console.log('Archive Lambda invoked');
+            return { statusCode: 200 };
+          };
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EnergyDataTable
+          BUCKET_NAME: !Ref HistoricalDataBucket
+          ENVIRONMENT: !Ref Environment
+      Timeout: 300
+      MemorySize: 512
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  AlertCheckerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "alert-checker-${Environment}"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          // This is a placeholder. The actual code will be deployed separately.
+          exports.handler = async (event) => {
+            console.log('Alert Checker Lambda invoked');
+            return { statusCode: 200 };
+          };
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EnergyDataTable
+          SNS_TOPIC: !Ref AlertTopic
+          ENVIRONMENT: !Ref Environment
+      Timeout: 60
+      MemorySize: 256
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========== IAM Role ==========
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "SmartCampusEnergyLambdaRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: SmartCampusEnergyPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:*'
+                Resource: !GetAtt EnergyDataTable.Arn
+              - Effect: Allow
+                Action:
+                  - 's3:*'
+                Resource:
+                  - !GetAtt HistoricalDataBucket.Arn
+                  - !Sub "${HistoricalDataBucket.Arn}/*"
+                  - !GetAtt WebsiteBucket.Arn
+                  - !Sub "${WebsiteBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - 'sns:Publish'
+                Resource: !Ref AlertTopic
+              - Effect: Allow
+                Action:
+                  - 'cloudwatch:PutMetricData'
+                Resource: '*'
+
+  # ========== EventBridge Rules ==========
+  DataSimulationSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "data-simulation-schedule-${Environment}"
+      Description: "Schedule for data simulation Lambda function"
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DataSimulationFunction.Arn
+          Id: "DataSimulationTarget"
+
+  DataSimulationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DataSimulationFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt DataSimulationSchedule.Arn
+
+  ArchiveSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "archive-schedule-${Environment}"
+      Description: "Schedule for archive Lambda function"
+      ScheduleExpression: "cron(0 2 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ArchiveFunction.Arn
+          Id: "ArchiveTarget"
+
+  ArchivePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ArchiveFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt ArchiveSchedule.Arn
+
+  # ========== API Gateway ==========
+  EnergyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "smart-campus-energy-api-${Environment}"
+      Description: "API for Smart Campus Energy Management System"
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  EnergyApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref EnergyApi
+      ParentId: !GetAtt EnergyApi.RootResourceId
+      PathPart: "energy"
+
+  EnergyApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref EnergyApi
+      ResourceId: !Ref EnergyApiResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiHandlerFunction.Arn}/invocations"
+
+  EnergyApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - EnergyApiMethod
+    Properties:
+      RestApiId: !Ref EnergyApi
+      StageName: !Ref Environment
+
+  ApiHandlerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiHandlerFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${EnergyApi}/${Environment}/GET/energy"
+
+  # ========== CloudFront Distribution ==========
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt WebsiteBucket.DomainName
+            Id: S3Origin
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        Enabled: true
+        DefaultRootObject: index.html
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  # ========== SNS Topic ==========
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "energy-alerts-${Environment}"
+      DisplayName: "Energy Alerts"
+
+  # ========== CloudWatch Alarms ==========
+  HighEnergyConsumptionAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "high-energy-consumption-${Environment}"
+      AlarmDescription: "Alarm when energy consumption exceeds threshold"
+      MetricName: EnergyConsumption
+      Namespace: "SmartCampus"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1000
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${EnergyApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/energy"
+
+  CloudFrontURL:
+    Description: "CloudFront Distribution URL"
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+
+  DynamoDBTable:
+    Description: "DynamoDB Table Name"
+    Value: !Ref EnergyDataTable
+
+  HistoricalDataBucketName:
+    Description: "S3 Bucket for Historical Data"
+    Value: !Ref HistoricalDataBucket
+
+  WebsiteBucketName:
+    Description: "S3 Bucket for Website"
+    Value: !Ref WebsiteBucket

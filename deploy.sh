@@ -1,0 +1,137 @@
+#!/bin/bash
+
+# Smart Campus Energy Management System
+# Deployment Script
+
+# Exit on error
+set -e
+
+# Configuration
+STACK_NAME="smart-campus-energy"
+ENVIRONMENT="dev"
+REGION="us-east-1"
+DEPLOYMENT_BUCKET="${STACK_NAME}-deployment-${ENVIRONMENT}"
+CLOUDFORMATION_TEMPLATE="infrastructure/cloudformation/template.yaml"
+PACKAGED_TEMPLATE="packaged.yaml"
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Print banner
+echo -e "${GREEN}"
+echo "=================================================="
+echo "  Smart Campus Energy Management System Deployment"
+echo "=================================================="
+echo -e "${NC}"
+
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+    echo -e "${RED}Error: AWS CLI is not installed. Please install it before running this script.${NC}"
+    exit 1
+fi
+
+# Check AWS credentials
+echo "Checking AWS credentials..."
+if ! aws sts get-caller-identity &> /dev/null; then
+    echo -e "${RED}Error: AWS credentials not configured. Please run 'aws configure' and try again.${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ AWS credentials valid${NC}"
+
+# Create deployment bucket if it doesn't exist
+echo "Checking deployment bucket..."
+if ! aws s3 ls "s3://${DEPLOYMENT_BUCKET}" &> /dev/null; then
+    echo "Creating deployment bucket: ${DEPLOYMENT_BUCKET}"
+    aws s3 mb "s3://${DEPLOYMENT_BUCKET}" --region ${REGION}
+    
+    # Wait for bucket to be available
+    echo "Waiting for bucket to be available..."
+    sleep 5
+else
+    echo -e "${GREEN}✓ Deployment bucket exists${NC}"
+fi
+
+# Build and package Lambda functions
+echo "Building and packaging Lambda functions..."
+
+FUNCTIONS=("data-simulation" "api-handler" "archive" "alert-checker")
+
+for func in "${FUNCTIONS[@]}"; do
+    echo "Building function: ${func}"
+    cd "src/functions/${func}"
+    
+    # Install dependencies if package.json exists and node_modules doesn't
+    if [ -f package.json ] && [ ! -d node_modules ]; then
+        echo "Installing dependencies for ${func}..."
+        npm install --production
+    fi
+    
+    # Go back to the project root
+    cd ../../..
+done
+
+echo -e "${GREEN}✓ Lambda functions packaged${NC}"
+
+# Package CloudFormation template
+echo "Packaging CloudFormation template..."
+aws cloudformation package \
+    --template-file ${CLOUDFORMATION_TEMPLATE} \
+    --s3-bucket ${DEPLOYMENT_BUCKET} \
+    --output-template-file ${PACKAGED_TEMPLATE} \
+    --region ${REGION}
+
+echo -e "${GREEN}✓ Template packaged${NC}"
+
+# Deploy CloudFormation stack
+echo "Deploying CloudFormation stack: ${STACK_NAME}"
+echo -e "${YELLOW}This may take several minutes...${NC}"
+
+aws cloudformation deploy \
+    --template-file ${PACKAGED_TEMPLATE} \
+    --stack-name ${STACK_NAME} \
+    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+    --parameter-overrides Environment=${ENVIRONMENT} RetentionDays=30 \
+    --region ${REGION}
+
+echo -e "${GREEN}✓ Stack deployed successfully${NC}"
+
+# Get stack outputs
+echo "Retrieving stack outputs..."
+WEBSITE_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='WebsiteBucketName'].OutputValue" --output text)
+API_ENDPOINT=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
+CLOUDFRONT_URL=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='CloudFrontURL'].OutputValue" --output text)
+
+# Update API endpoint in web app configuration
+echo "Updating API endpoint in web application..."
+sed -i.bak "s|apiEndpoint: 'https://your-api-gateway-url.execute-api.us-east-1.amazonaws.com/dev/energy'|apiEndpoint: '${API_ENDPOINT}'|g" src/web/js/app.js
+rm src/web/js/app.js.bak
+
+# Upload website files to S3
+echo "Uploading website files to S3..."
+aws s3 sync src/web/ "s3://${WEBSITE_BUCKET}/" --acl public-read --region ${REGION}
+
+echo -e "${GREEN}✓ Website uploaded${NC}"
+
+# Create invalidation to refresh CloudFront cache
+echo "Creating CloudFront invalidation..."
+CLOUDFRONT_DISTRIBUTION_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='${CLOUDFRONT_URL#https://}'].Id" --output text --region ${REGION})
+
+if [ ! -z "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
+    aws cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DISTRIBUTION_ID} --paths "/*" --region ${REGION}
+    echo -e "${GREEN}✓ CloudFront invalidation created${NC}"
+else
+    echo -e "${YELLOW}Warning: Could not find CloudFront distribution ID. Cache invalidation skipped.${NC}"
+fi
+
+# Print summary
+echo -e "\n${GREEN}======================================================${NC}"
+echo -e "${GREEN}Deployment Completed Successfully!${NC}"
+echo -e "${GREEN}======================================================${NC}"
+echo -e "Website URL: ${CLOUDFRONT_URL}"
+echo -e "API Endpoint: ${API_ENDPOINT}"
+echo -e "\nNote: It may take a few minutes for the CloudFront distribution to fully deploy."
+echo -e "${GREEN}======================================================${NC}"
