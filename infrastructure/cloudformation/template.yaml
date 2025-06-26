@@ -14,6 +14,14 @@ Parameters:
     Type: Number
     Default: 30
     Description: Number of days to retain data in DynamoDB before archiving
+  
+  NotificationEmail:
+    Type: String
+    Default: ""
+    Description: Email address to receive alert notifications (leave empty to skip email notifications)
+
+Conditions:
+  HasNotificationEmail: !Not [!Equals [!Ref NotificationEmail, ""]]
 
 Resources:
   # ========== S3 Buckets ==========
@@ -132,6 +140,7 @@ Resources:
           TABLE_NAME: !Ref EnergyDataTable
           ENVIRONMENT: !Ref Environment
           HISTORICAL_BUCKET: !Ref HistoricalDataBucket
+          DASHBOARD_URL: !Sub "http://${WebsiteBucket}.s3-website-${AWS::Region}.amazonaws.com"
       Timeout: 30
       MemorySize: 256
       Tags:
@@ -174,6 +183,7 @@ Resources:
           TABLE_NAME: !Ref EnergyDataTable
           SNS_TOPIC: !Ref AlertTopic
           ENVIRONMENT: !Ref Environment
+          DASHBOARD_URL: !Sub "http://${WebsiteBucket}.s3-website-${AWS::Region}.amazonaws.com"
       Timeout: 60
       MemorySize: 256
       Tags:
@@ -218,6 +228,36 @@ Resources:
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt ArchiveSchedule.Arn
+
+  # Add a new rule to trigger alerts every 5 minutes
+  AlertCheckerSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "alert-checker-schedule-${Environment}"
+      Description: "Schedule for alert checker Lambda function"
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt AlertCheckerFunction.Arn
+          Id: "AlertCheckerTarget"
+
+  AlertCheckerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AlertCheckerFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt AlertCheckerSchedule.Arn
+
+  # Add DynamoDB Stream Trigger for Alert Checker
+  AlertCheckerEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt EnergyDataTable.StreamArn
+      FunctionName: !GetAtt AlertCheckerFunction.Arn
+      StartingPosition: LATEST
 
   # ========== API Gateway ==========
   EnergyApi:
@@ -300,12 +340,20 @@ Resources:
       Principal: "apigateway.amazonaws.com"
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${EnergyApi}/${Environment}/GET/energy"
 
-  # ========== SNS Topic ==========
+  # ========== SNS Topic and Subscription ==========
   AlertTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub "energy-alerts-${Environment}"
       DisplayName: "Energy Alerts"
+
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
 
   # ========== CloudWatch Alarms ==========
   HighEnergyConsumptionAlarm:
@@ -318,7 +366,7 @@ Resources:
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 1000
+      Threshold: 200  # Lower threshold to 200 to match with Lambda function
       ComparisonOperator: GreaterThanThreshold
       AlarmActions:
         - !Ref AlertTopic
@@ -343,3 +391,7 @@ Outputs:
   WebsiteBucketName:
     Description: "S3 Bucket for Website"
     Value: !Ref WebsiteBucket
+
+  SNSTopicARN:
+    Description: "SNS Topic ARN for alerts"
+    Value: !Ref AlertTopic

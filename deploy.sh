@@ -14,6 +14,13 @@ DEPLOYMENT_BUCKET="${STACK_NAME}-deployment-${ENVIRONMENT}"
 CLOUDFORMATION_TEMPLATE="infrastructure/cloudformation/template.yaml"
 PACKAGED_TEMPLATE="packaged.yaml"
 
+# Check if email argument is provided
+NOTIFICATION_EMAIL=""
+if [ $# -ge 1 ]; then
+    NOTIFICATION_EMAIL=$1
+    echo "Notification email set to: $NOTIFICATION_EMAIL"
+fi
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -115,11 +122,17 @@ echo -e "${GREEN}✓ Template packaged${NC}"
 echo "Deploying CloudFormation stack: ${STACK_NAME}"
 echo -e "${YELLOW}This may take several minutes...${NC}"
 
+# Build parameter overrides string
+PARAMS="Environment=${ENVIRONMENT} RetentionDays=30"
+if [ ! -z "$NOTIFICATION_EMAIL" ]; then
+    PARAMS="${PARAMS} NotificationEmail=${NOTIFICATION_EMAIL}"
+fi
+
 aws cloudformation deploy \
     --template-file ${PACKAGED_TEMPLATE} \
     --stack-name ${STACK_NAME} \
     --capabilities CAPABILITY_NAMED_IAM \
-    --parameter-overrides Environment=${ENVIRONMENT} RetentionDays=30 \
+    --parameter-overrides ${PARAMS} \
     --region ${REGION}
 
 echo -e "${GREEN}✓ Stack deployed successfully${NC}"
@@ -129,6 +142,7 @@ echo "Retrieving stack outputs..."
 WEBSITE_BUCKET=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='WebsiteBucketName'].OutputValue" --output text)
 API_ENDPOINT=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
 WEBSITE_URL=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='WebsiteURL'].OutputValue" --output text)
+SNS_TOPIC=$(aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${REGION} --query "Stacks[0].Outputs[?OutputKey=='SNSTopicARN'].OutputValue" --output text || echo "")
 
 # Update API endpoint in web app configuration
 echo "Updating API endpoint in web application..."
@@ -147,4 +161,24 @@ echo -e "${GREEN}Deployment Completed Successfully!${NC}"
 echo -e "${GREEN}======================================================${NC}"
 echo -e "Website URL: ${WEBSITE_URL}"
 echo -e "API Endpoint: ${API_ENDPOINT}"
+if [ ! -z "$SNS_TOPIC" ]; then
+    echo -e "SNS Topic ARN: ${SNS_TOPIC}"
+fi
+if [ ! -z "$NOTIFICATION_EMAIL" ]; then
+    echo -e "Notification Email: ${NOTIFICATION_EMAIL}"
+    echo -e "⚠️  Please check your email and confirm the subscription to receive alerts"
+fi
 echo -e "${GREEN}======================================================${NC}"
+
+# Generate a test alert if email was provided
+if [ ! -z "$NOTIFICATION_EMAIL" ]; then
+    echo -e "\n${YELLOW}Generating a test alert to validate the alert system...${NC}"
+    aws lambda invoke \
+        --function-name alert-checker-dev \
+        --payload '{"Records":[{"dynamodb":{"NewImage":{"buildingId":{"S":"academic-01"},"buildingName":{"S":"Rowe Building"},"buildingType":{"S":"academic"},"timestamp":{"S":"'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"},"energyKwh":{"N":"300"},"temperature":{"N":"79"},"occupancy":{"N":"200"},"cost":{"N":"36"}}}}]}' \
+        response.json &>/dev/null || true
+    rm -f response.json
+
+    echo -e "${GREEN}✓ Test alert generated${NC}"
+    echo -e "You should receive an email alert after confirming your subscription."
+fi
